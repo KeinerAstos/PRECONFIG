@@ -73,7 +73,13 @@ agendar_wfm.click()
 # Lista de órdenes a procesar
 # Ejemplo de arreglo
 # Lista de órdenes a procesar
-ordenes = ["459530118","459530118"]  # Ejemplo de arreglo
+ordenes = ["458949233","456596759"]  # Ejemplo de arreglo
+notas_orden = []
+estado_programa = []
+fecha_programa = []
+franja_programa = []
+nota_ofsc = []
+
 
 for orden in ordenes:
     # Ingresar número de orden
@@ -130,12 +136,65 @@ for orden in ordenes:
         )
         notas_text = notas_element.text
         print(f"Notas de la orden {orden}: {notas_text}")
+        notas_orden.append(notas_text)
     except:
         print(f"No se encontraron notas para la orden {orden}")
+        notas_orden.append("N/A")
+
+    # Entrar a la pestaña Visita
+    visita_trabajo = wait.until(
+        EC.element_to_be_clickable((By.ID, "visita_menu"))
+    )
+    visita_trabajo.click()
+
+    try:
+        estado_programada_element = wait.until(
+            EC.presence_of_element_located(
+                (By.XPATH, "//th[contains(text(),'Estado de la Visita')]/following-sibling::td[@class='verderesaltado']")
+            )
+        )
+        estado_programada = estado_programada_element.text.strip()
+        print(f"estado programada: {estado_programada}")
+        estado_programa.append(estado_programada)
+    except:
+        print("No se encontró ESTADO-----------------")
+        estado_programa.append("N/A")
+
+    # ---- FECHA PROGRAMADA ----
+    try:
+        fecha_programada_element = wait.until(
+            EC.presence_of_element_located(
+                (By.XPATH, "//th[contains(text(),'Fecha Programada')]/following-sibling::td[@class='verderesaltado']")
+            )
+        )
+        fecha_programada = fecha_programada_element.text.strip()
+        print(f"Fecha programada: {fecha_programada}")
+        fecha_programa.append(fecha_programada)
+    except:
+        print("No se encontró FECHA PROGRAMADA")
+        fecha_programa.append("N/A")
+
+    # ---- FRANJA SUSCRIPTOR ----
+    try:
+        franja_element = wait.until(
+            EC.presence_of_element_located(
+                (By.XPATH, "//th[contains(text(),'Franja Suscriptor')]/following-sibling::td[@class='verderesaltado']")
+            )
+        )
+        franja_text = franja_element.text.strip()
+        print(f"Franja suscriptor: {franja_text}")
+        franja_programa.append(franja_text)
+    except:
+        print("No se encontró FRANJA")
+        franja_programa.append("N/A")
+
+
     # -------------------------------------------------------------------
     # 🔥 NUEVA PARTE: Buscar fila Pendiente y dar click en Ver Detalle
     # -------------------------------------------------------------------
     print("Buscando filas con estado Pendiente...")
+
+
 
     ofsc_tab = wait.until(
         EC.element_to_be_clickable((By.ID,"ofsc_menu"))
@@ -187,11 +246,13 @@ for orden in ordenes:
                     notas = WebDriverWait(driver, 20).until(
                         EC.presence_of_element_located((By.ID, "notasorden"))
                     )
-
+                    nota_f = notas.text
                     print("📌 Notas de la orden:", notas.text)
+                    nota_ofsc.append(nota_f)
 
                 except Exception as e:
                     print("❌ No se pudo extraer notas de la orden:", e)
+                    nota_ofsc.append("N/A")
 
                 # Si solo quieres procesar la primera orden pendiente, descomenta:
                 # break
@@ -214,3 +275,23 @@ for orden in ordenes:
 
 print("Todas las órdenes procesadas correctamente.")
 driver.quit()
+
+
+print("===================================")
+tabla_unificada = []
+
+for ord_val, nota, estado, fecha, franja, ofsc in zip(
+        ordenes, notas_orden, estado_programa, fecha_programa, franja_programa, nota_ofsc):
+    
+    tabla_unificada.append({
+        "orden": ord_val,
+        "nota_orden": nota,
+        "estado_programa": estado,
+        "fecha_programada": fecha,
+        "franja_programada": franja,
+        "nota_ofsc": ofsc
+    })
+
+print("\n--- TABLA UNIFICADA ---")
+for fila in tabla_unificada:
+    print(fila)
