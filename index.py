@@ -37,7 +37,6 @@ contrasena_input = wait.until(
 )
 contrasena_input.send_keys("Crami1*1*=")
 
-# Esperar un momento para que JS renderice el botón
 time.sleep(2)
 
 # Click en el botón de login
@@ -72,9 +71,9 @@ agendar_wfm = wait.until(
 agendar_wfm.click()
 
 # Lista de órdenes a procesar
-ordenes = ["459530118"]  # Ejemplo de arreglo
-
-from selenium.webdriver.common.action_chains import ActionChains
+# Ejemplo de arreglo
+# Lista de órdenes a procesar
+ordenes = ["459530118","459530118"]  # Ejemplo de arreglo
 
 for orden in ordenes:
     # Ingresar número de orden
@@ -100,11 +99,11 @@ for orden in ordenes:
     )
     btn_consultar.click()
 
-    # Esperar a que la página procese la orden
+    # Esperar procesamiento
     print("Esperando a que la página procese la orden...")
-    time.sleep(2)  # Ajusta según velocidad de carga
+    time.sleep(2)
 
-    # Hover sobre el menú y click confiable en pestaña Orden
+    # Hover sobre el menú y click en pestaña Orden
     print("Intentando click en pestaña Orden...")
     menu_container = wait.until(
         EC.presence_of_element_located((By.ID, "menuh-info-agendamiento"))
@@ -119,10 +118,10 @@ for orden in ordenes:
     except:
         driver.execute_script("arguments[0].click();", orden_tab)
 
-    # Esperar a que cargue contenido dentro de la pestaña "Orden"
-    time.sleep(1)  # Espera pequeña para renderizado
+    # Esperar carga
+    time.sleep(1)
 
-    # Extraer contenido de Notas de la Orden
+    # Extraer contenido Notas
     try:
         notas_element = wait.until(
             EC.presence_of_element_located(
@@ -133,7 +132,84 @@ for orden in ordenes:
         print(f"Notas de la orden {orden}: {notas_text}")
     except:
         print(f"No se encontraron notas para la orden {orden}")
+    # -------------------------------------------------------------------
+    # 🔥 NUEVA PARTE: Buscar fila Pendiente y dar click en Ver Detalle
+    # -------------------------------------------------------------------
+    print("Buscando filas con estado Pendiente...")
 
+    ofsc_tab = wait.until(
+        EC.element_to_be_clickable((By.ID,"ofsc_menu"))
+    )
+    try:
+        ofsc_tab.click()
+    except:
+        driver.execute_script("arguments[0].click();", ofsc_tab)
+    time.sleep(1)
+
+    print("Cambiando al iframe 'iframe-ofsc'...")
+    wait.until(EC.frame_to_be_available_and_switch_to_it((By.ID, "iframe-ofsc")))
+    print("Dentro del iframe correctamente.")
+
+    try:
+        tbody = wait.until(
+            EC.presence_of_element_located((By.ID, "tbodyMainList"))
+        )
+
+        filas = tbody.find_elements(By.TAG_NAME, "tr")
+
+        for fila in filas:
+            celdas = fila.find_elements(By.TAG_NAME, "td")
+
+            if len(celdas) < 7:
+                continue
+
+            estado = celdas[5].text.strip()
+            print(" - Estado encontrado:", estado)
+
+            if estado.lower() == "pendiente":
+                print("   ✔ Estado es Pendiente → haciendo click en Ver detalle")
+
+                boton = celdas[-1].find_element(By.CSS_SELECTOR, "button.checkDetails")
+
+                try:
+                    boton.click()
+                    time.sleep(1)
+
+                except:
+                    driver.execute_script("arguments[0].click();", boton)
+
+                # -------------------------------------------------------------------
+                # ⭐ NUEVA PARTE: Capturar el texto de <span id="notasorden">
+                # -------------------------------------------------------------------
+                try:
+                    print("Esperando contenido de notas de la orden...")
+
+                    notas = WebDriverWait(driver, 20).until(
+                        EC.presence_of_element_located((By.ID, "notasorden"))
+                    )
+
+                    print("📌 Notas de la orden:", notas.text)
+
+                except Exception as e:
+                    print("❌ No se pudo extraer notas de la orden:", e)
+
+                # Si solo quieres procesar la primera orden pendiente, descomenta:
+                # break
+            
+    except Exception as e:
+        print("Error al procesar la tabla:", e)
+    print("Saliendo del iframe para continuar...")
+    driver.switch_to.default_content()
+
+    regresar_tab = wait.until(
+        EC.element_to_be_clickable((By.ID,"return-suscriptor"))
+    )
+    try:
+        regresar_tab.click()
+    except:
+        driver.execute_script("arguments[0].click();", regresar_tab)
+
+    time.sleep(1)
     print(f"Procesada orden: {orden}")
 
 print("Todas las órdenes procesadas correctamente.")
