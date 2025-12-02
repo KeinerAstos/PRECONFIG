@@ -1,297 +1,223 @@
+import flet as ft
+import threading
+import os
+import pandas as pd
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
-from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.common.action_chains import ActionChains
-import time
+from webdriver_manager.chrome import ChromeDriverManager
+import json
+from datetime import datetime
+import subprocess
+from concurrent.futures import ThreadPoolExecutor
 
-# Configuración del navegador
-chrome_options = Options()
-# chrome_options.add_argument("--headless")  # Descomenta si quieres modo headless
-chrome_options.add_argument("--no-sandbox")
-chrome_options.add_argument("--disable-dev-shm-usage")
-chrome_options.add_argument("--disable-gpu")
-chrome_options.add_argument("--window-size=1920,1080")
+def main(page: ft.Page):
+    page.title = "Scraping Agenda FO"
+    page.window_width = 900
+    page.window_height = 600
 
-driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
-wait = WebDriverWait(driver, 20)
+    # UI Elements
+    archivo_label = ft.Text("Ningún archivo seleccionado", size=14)
+    log_output = ft.Column(scroll="auto", expand=True)
+    usuario_input = ft.TextField(label="Usuario")
+    contrasena_input = ft.TextField(label="Contraseña", password=True, can_reveal_password=True)
 
-# Abrir portal
-print("Abriendo portal...")
-driver.get("https://moduloagenda.cable.net.co/index.php")
+    # File Picker
+    def seleccionar_archivo_result(e: ft.FilePickerResultEvent):
+        if e.files:
+            archivo_label.value = e.files[0].path
+            page.update()
 
-# Ingresar usuario
-print("Ingresando usuario...")
-usuario_input = wait.until(
-    EC.presence_of_element_located((By.XPATH, "//td[contains(., 'Usuario')]/input"))
-)
-usuario_input.send_keys("46231030")
+    archivo_picker = ft.FilePicker(on_result=seleccionar_archivo_result)
+    page.overlay.append(archivo_picker)
 
-# Ingresar contraseña
-print("Ingresando contraseña...")
-contrasena_input = wait.until(
-    EC.presence_of_element_located((By.XPATH, "//td[contains(., 'Contraseña')]/input"))
-)
-contrasena_input.send_keys("Crami1*1*=")
+    def abrir_picker(e):
+        archivo_picker.pick_files()
 
-time.sleep(2)
+    # Log handler
+    def log_handler(mensaje):
+        log_output.controls.append(ft.Text(mensaje))
+        page.update()
 
-# Click en el botón de login
-print("Click en INGRESAR...")
-btn_login = wait.until(
-    EC.element_to_be_clickable((By.XPATH, "//button[@type='submit'] | //input[@type='submit']"))
-)
-btn_login.click()
+    # Función de scraping por orden
+    def procesar_orden(orden, usuario_val, contrasena_val):
+        resultado = {"orden": orden, "nota_orden": "N/A", "estado_programa": "N/A",
+                     "fecha_programada": "N/A", "franja_programada": "N/A", "nota_ofsc": "N/A"}
+        try:
+            chrome_options = Options()
+            chrome_options.add_argument("--headless=new")
+            chrome_options.add_argument("--no-sandbox")
+            chrome_options.add_argument("--disable-dev-shm-usage")
+            chrome_options.add_argument("--disable-gpu")
+            chrome_options.add_argument("--window-size=1920,1080")
+            chrome_options.add_argument("--disable-extensions")
+            chrome_options.add_argument("--disable-infobars")
+            chrome_options.add_argument("--blink-settings=imagesEnabled=false")
 
-# Esperar que cargue la página principal
-time.sleep(3)
+            driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
+            wait = WebDriverWait(driver, 20)
 
-# Click en la foto/logo para desplegar menú
-print("Click en logo para desplegar menú...")
-logo_click = wait.until(
-    EC.element_to_be_clickable((By.ID, "imgAtrasMenu"))
-)
-logo_click.click()
+            driver.get("https://moduloagenda.cable.net.co/index.php")
 
-# Click en Agendamiento
-print("Click en Agendamiento...")
-agendamiento = wait.until(
-    EC.element_to_be_clickable((By.XPATH, "//a[@title='Agendamiento']"))
-)
-agendamiento.click()
+            # Login
+            wait.until(EC.presence_of_element_located((By.XPATH, "//td[contains(., 'Usuario')]/input"))).send_keys(usuario_val)
+            wait.until(EC.presence_of_element_located((By.XPATH, "//td[contains(., 'Contraseña')]/input"))).send_keys(contrasena_val)
+            wait.until(EC.element_to_be_clickable((By.XPATH, "//button[@type='submit'] | //input[@type='submit']"))).click()
 
-# Click en Agendar WFM
-print("Click en Agendar WFM...")
-agendar_wfm = wait.until(
-    EC.element_to_be_clickable((By.XPATH, "//a[contains(@href, 'Agendamiento/index.php') and contains(@title, 'Agendar WFM')]"))
-)
-agendar_wfm.click()
+            # Esperar página principal
+            wait.until(EC.element_to_be_clickable((By.ID, "imgAtrasMenu")))
 
-# Lista de órdenes a procesar
-# Ejemplo de arreglo
-# Lista de órdenes a procesar
-ordenes = ["458949233","456596759"]  # Ejemplo de arreglo
-notas_orden = []
-estado_programa = []
-fecha_programa = []
-franja_programa = []
-nota_ofsc = []
+            # Navegación Agendamiento
+            wait.until(EC.element_to_be_clickable((By.ID, "imgAtrasMenu"))).click()
+            wait.until(EC.element_to_be_clickable((By.XPATH, "//a[@title='Agendamiento']"))).click()
+            wait.until(EC.element_to_be_clickable((By.XPATH, "//a[contains(@href, 'Agendamiento/index.php') and contains(@title, 'Agendar WFM')]"))).click()
 
+            # Procesar orden
+            tb_orden = wait.until(EC.presence_of_element_located((By.ID, "TBorden")))
+            tb_orden.clear()
+            tb_orden.send_keys(orden)
+            driver.execute_script("arguments[0].dispatchEvent(new Event('change'));", tb_orden)
 
-for orden in ordenes:
-    # Ingresar número de orden
-    print(f"Ingresando orden: {orden}")
-    tb_orden = wait.until(
-        EC.presence_of_element_located((By.ID, "TBorden"))
+            wait.until(EC.element_to_be_clickable((By.ID, "Rbot-O"))).click()
+            wait.until(EC.element_to_be_clickable((By.ID, "button"))).click()
+
+            # Pestaña Orden
+            menu_container = wait.until(EC.presence_of_element_located((By.ID, "menuh-info-agendamiento")))
+            ActionChains(driver).move_to_element(menu_container).perform()
+            orden_tab = wait.until(EC.element_to_be_clickable((By.ID, "orden_menu")))
+            try:
+                orden_tab.click()
+            except:
+                driver.execute_script("arguments[0].click();", orden_tab)
+
+            # Notas de la orden
+            try:
+                resultado["nota_orden"] = wait.until(
+                    EC.presence_of_element_located((By.XPATH, "//tr[th[contains(text(), 'Notas de la Orden')]]/td/p"))
+                ).text
+            except:
+                resultado["nota_orden"] = "N/A"
+
+            # Pestaña Visita
+            wait.until(EC.element_to_be_clickable((By.ID, "visita_menu"))).click()
+            try:
+                resultado["estado_programa"] = wait.until(
+                    EC.presence_of_element_located((By.XPATH, "//th[contains(text(),'Estado de la Visita')]/following-sibling::td[@class='verderesaltado']"))
+                ).text.strip()
+            except:
+                resultado["estado_programa"] = "N/A"
+            try:
+                resultado["fecha_programada"] = wait.until(
+                    EC.presence_of_element_located((By.XPATH, "//th[contains(text(),'Fecha Programada')]/following-sibling::td[@class='verderesaltado']"))
+                ).text.strip()
+            except:
+                resultado["fecha_programada"] = "N/A"
+            try:
+                resultado["franja_programada"] = wait.until(
+                    EC.presence_of_element_located((By.XPATH, "//th[contains(text(),'Franja Suscriptor')]/following-sibling::td[@class='verderesaltado']"))
+                ).text.strip()
+            except:
+                resultado["franja_programada"] = "N/A"
+
+            # OFSC
+            wait.until(EC.element_to_be_clickable((By.ID, "ofsc_menu"))).click()
+            wait.until(EC.frame_to_be_available_and_switch_to_it((By.ID, "iframe-ofsc")))
+            try:
+                tbody = wait.until(EC.presence_of_element_located((By.ID, "tbodyMainList")))
+                filas = tbody.find_elements(By.TAG_NAME, "tr")
+                for fila in filas:
+                    celdas = fila.find_elements(By.TAG_NAME, "td")
+                    if len(celdas) < 7: 
+                        continue
+                    if celdas[5].text.strip().lower() == "pendiente":
+                        boton = celdas[-1].find_element(By.CSS_SELECTOR, "button.checkDetails")
+                        try:
+                            boton.click()
+                        except:
+                            driver.execute_script("arguments[0].click();", boton)
+                        try:
+                            notas_text_ofsc = wait.until(EC.presence_of_element_located((By.ID, "notasorden"))).text.strip()
+                            try:
+                                data_json = json.loads(notas_text_ofsc)
+                                if data_json.get("error"):
+                                    resultado["nota_ofsc"] = "SIN DATOS"
+                                else:
+                                    resultado["nota_ofsc"] = notas_text_ofsc
+                            except:
+                                resultado["nota_ofsc"] = notas_text_ofsc
+                        except:
+                            resultado["nota_ofsc"] = "N/A"
+            except:
+                resultado["nota_ofsc"] = "N/A"
+            driver.switch_to.default_content()
+            wait.until(EC.element_to_be_clickable((By.ID, "return-suscriptor"))).click()
+            driver.quit()
+        except Exception as e:
+            resultado["nota_orden"] = f"ERROR: {e}"
+        return resultado
+
+    # Función principal que maneja todos los hilos
+    def ejecutar_scraping(handler):
+        ruta_archivo = archivo_label.value
+        if not ruta_archivo:
+            handler("❌ No se seleccionó ningún archivo")
+            return
+        df = pd.read_excel(ruta_archivo, usecols=["Orden de trabajo","Subtipo de la Orden de Trabajo"], dtype=str)
+        lista_rr = df.loc[df["Subtipo de la Orden de Trabajo"]=="Entrega De Servicios FO", "Orden de trabajo"].str[:9].tolist()
+        usuario_val = usuario_input.value
+        contrasena_val = contrasena_input.value
+
+        resultados_finales = []
+
+        handler(f"🔹 Iniciando procesamiento de {len(lista_rr)} órdenes en paralelo...")
+
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            futures = [executor.submit(procesar_orden, orden, usuario_val, contrasena_val) for orden in lista_rr]
+            for future in futures:
+                resultado = future.result()
+                resultados_finales.append(resultado)
+                handler(f"✅ Orden {resultado['orden']} procesada")
+
+        # Guardar resultados
+        resultado_dir = os.path.join(os.getcwd(), "RESULTADO")
+        os.makedirs(resultado_dir, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_path = os.path.join(resultado_dir, f"resultado_{timestamp}.xlsx")
+        pd.DataFrame(resultados_finales).to_excel(output_path, index=False)
+        handler(f"✅ Resultados guardados en: {output_path}")
+
+    # Botones
+    def iniciar_scraping(e):
+        threading.Thread(target=ejecutar_scraping, args=(log_handler,), daemon=True).start()
+
+    def abrir_resultado(e):
+        resultado_dir = os.path.join(os.getcwd(), "RESULTADO")
+        if os.name == "nt":
+            subprocess.Popen(f'explorer "{resultado_dir}"')
+        else:
+            subprocess.Popen(["open", resultado_dir])
+
+    # Layout
+    page.add(
+        ft.Row([
+            ft.Column([
+                ft.Text("Menu", weight="bold", size=18),
+                usuario_input,
+                contrasena_input,
+                ft.ElevatedButton("Seleccionar archivo", on_click=abrir_picker),
+                archivo_label,
+                ft.ElevatedButton("Iniciar Scraping", on_click=iniciar_scraping),
+                ft.ElevatedButton("Abrir carpeta RESULTADO", on_click=abrir_resultado)
+            ], width=250, scroll="auto", spacing=10),
+            ft.Column([
+                ft.Text("Registro de Logs", weight="bold", size=16),
+                log_output
+            ], expand=True)
+        ], expand=True)
     )
-    tb_orden.clear()
-    tb_orden.send_keys(orden)
 
-    # Disparar evento onchange
-    driver.execute_script("arguments[0].dispatchEvent(new Event('change'));", tb_orden)
-
-    # Seleccionar radio "Orden de Trabajo"
-    orden_trabajo = wait.until(
-        EC.element_to_be_clickable((By.ID, "Rbot-O"))
-    )
-    orden_trabajo.click()
-
-    # Click en Consultar
-    btn_consultar = wait.until(
-        EC.element_to_be_clickable((By.ID, "button"))
-    )
-    btn_consultar.click()
-
-    # Esperar procesamiento
-    print("Esperando a que la página procese la orden...")
-    time.sleep(2)
-
-    # Hover sobre el menú y click en pestaña Orden
-    print("Intentando click en pestaña Orden...")
-    menu_container = wait.until(
-        EC.presence_of_element_located((By.ID, "menuh-info-agendamiento"))
-    )
-    ActionChains(driver).move_to_element(menu_container).perform()
-
-    orden_tab = wait.until(
-        EC.element_to_be_clickable((By.ID, "orden_menu"))
-    )
-    try:
-        orden_tab.click()
-    except:
-        driver.execute_script("arguments[0].click();", orden_tab)
-
-    # Esperar carga
-    time.sleep(1)
-
-    # Extraer contenido Notas
-    try:
-        notas_element = wait.until(
-            EC.presence_of_element_located(
-                (By.XPATH, "//tr[th[contains(text(), 'Notas de la Orden')]]/td/p")
-            )
-        )
-        notas_text = notas_element.text
-        print(f"Notas de la orden {orden}: {notas_text}")
-        notas_orden.append(notas_text)
-    except:
-        print(f"No se encontraron notas para la orden {orden}")
-        notas_orden.append("N/A")
-
-    # Entrar a la pestaña Visita
-    visita_trabajo = wait.until(
-        EC.element_to_be_clickable((By.ID, "visita_menu"))
-    )
-    visita_trabajo.click()
-
-    try:
-        estado_programada_element = wait.until(
-            EC.presence_of_element_located(
-                (By.XPATH, "//th[contains(text(),'Estado de la Visita')]/following-sibling::td[@class='verderesaltado']")
-            )
-        )
-        estado_programada = estado_programada_element.text.strip()
-        print(f"estado programada: {estado_programada}")
-        estado_programa.append(estado_programada)
-    except:
-        print("No se encontró ESTADO-----------------")
-        estado_programa.append("N/A")
-
-    # ---- FECHA PROGRAMADA ----
-    try:
-        fecha_programada_element = wait.until(
-            EC.presence_of_element_located(
-                (By.XPATH, "//th[contains(text(),'Fecha Programada')]/following-sibling::td[@class='verderesaltado']")
-            )
-        )
-        fecha_programada = fecha_programada_element.text.strip()
-        print(f"Fecha programada: {fecha_programada}")
-        fecha_programa.append(fecha_programada)
-    except:
-        print("No se encontró FECHA PROGRAMADA")
-        fecha_programa.append("N/A")
-
-    # ---- FRANJA SUSCRIPTOR ----
-    try:
-        franja_element = wait.until(
-            EC.presence_of_element_located(
-                (By.XPATH, "//th[contains(text(),'Franja Suscriptor')]/following-sibling::td[@class='verderesaltado']")
-            )
-        )
-        franja_text = franja_element.text.strip()
-        print(f"Franja suscriptor: {franja_text}")
-        franja_programa.append(franja_text)
-    except:
-        print("No se encontró FRANJA")
-        franja_programa.append("N/A")
-
-
-    # -------------------------------------------------------------------
-    # 🔥 NUEVA PARTE: Buscar fila Pendiente y dar click en Ver Detalle
-    # -------------------------------------------------------------------
-    print("Buscando filas con estado Pendiente...")
-
-
-
-    ofsc_tab = wait.until(
-        EC.element_to_be_clickable((By.ID,"ofsc_menu"))
-    )
-    try:
-        ofsc_tab.click()
-    except:
-        driver.execute_script("arguments[0].click();", ofsc_tab)
-    time.sleep(1)
-
-    print("Cambiando al iframe 'iframe-ofsc'...")
-    wait.until(EC.frame_to_be_available_and_switch_to_it((By.ID, "iframe-ofsc")))
-    print("Dentro del iframe correctamente.")
-
-    try:
-        tbody = wait.until(
-            EC.presence_of_element_located((By.ID, "tbodyMainList"))
-        )
-
-        filas = tbody.find_elements(By.TAG_NAME, "tr")
-
-        for fila in filas:
-            celdas = fila.find_elements(By.TAG_NAME, "td")
-
-            if len(celdas) < 7:
-                continue
-
-            estado = celdas[5].text.strip()
-            print(" - Estado encontrado:", estado)
-
-            if estado.lower() == "pendiente":
-                print("   ✔ Estado es Pendiente → haciendo click en Ver detalle")
-
-                boton = celdas[-1].find_element(By.CSS_SELECTOR, "button.checkDetails")
-
-                try:
-                    boton.click()
-                    time.sleep(1)
-
-                except:
-                    driver.execute_script("arguments[0].click();", boton)
-
-                # -------------------------------------------------------------------
-                # ⭐ NUEVA PARTE: Capturar el texto de <span id="notasorden">
-                # -------------------------------------------------------------------
-                try:
-                    print("Esperando contenido de notas de la orden...")
-
-                    notas = WebDriverWait(driver, 20).until(
-                        EC.presence_of_element_located((By.ID, "notasorden"))
-                    )
-                    nota_f = notas.text
-                    print("📌 Notas de la orden:", notas.text)
-                    nota_ofsc.append(nota_f)
-
-                except Exception as e:
-                    print("❌ No se pudo extraer notas de la orden:", e)
-                    nota_ofsc.append("N/A")
-
-                # Si solo quieres procesar la primera orden pendiente, descomenta:
-                # break
-            
-    except Exception as e:
-        print("Error al procesar la tabla:", e)
-    print("Saliendo del iframe para continuar...")
-    driver.switch_to.default_content()
-
-    regresar_tab = wait.until(
-        EC.element_to_be_clickable((By.ID,"return-suscriptor"))
-    )
-    try:
-        regresar_tab.click()
-    except:
-        driver.execute_script("arguments[0].click();", regresar_tab)
-
-    time.sleep(1)
-    print(f"Procesada orden: {orden}")
-
-print("Todas las órdenes procesadas correctamente.")
-driver.quit()
-
-
-print("===================================")
-tabla_unificada = []
-
-for ord_val, nota, estado, fecha, franja, ofsc in zip(
-        ordenes, notas_orden, estado_programa, fecha_programa, franja_programa, nota_ofsc):
-    
-    tabla_unificada.append({
-        "orden": ord_val,
-        "nota_orden": nota,
-        "estado_programa": estado,
-        "fecha_programada": fecha,
-        "franja_programada": franja,
-        "nota_ofsc": ofsc
-    })
-
-print("\n--- TABLA UNIFICADA ---")
-for fila in tabla_unificada:
-    print(fila)
+ft.app(target=main)
