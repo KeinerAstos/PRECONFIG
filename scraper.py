@@ -113,7 +113,7 @@ def cerrar_popup_rr(driver, handler=None):
 # ----------------------------------------------------
 # ANTI-BLOQUEO + REINTENTO DE CARGA
 # ----------------------------------------------------
-def cargar_url_segura(driver, url, handler, intentos=5):
+def cargar_url_segura(driver, url, handler, intentos=10):
     for i in range(intentos):
         driver.get(url)
         time.sleep(2)
